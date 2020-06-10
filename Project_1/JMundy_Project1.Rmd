@@ -1,0 +1,295 @@
+---
+title: "DATA 612 Project 1"
+author: "Jim Mundy"
+output:
+  html_document:
+    css: ./lab.css
+    highlight: pygments
+    theme: cerulean
+    toc: false
+    toc_float: false
+  pdf_document: default
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+
+library(tidyverse)
+library(scales)
+library(skimr)
+library(kableExtra)
+library(tidymodels)
+```
+
+
+### __Recommender System - PonyPickR__
+
+PonyPickR recommends horses to horse players based on ratings from popular speed figure providers. The system will not only recommend desirable horses, but should also provide some insight into the who are the best raters. The ratings utilized by  PonyPickR include:
+
+* `tfus_lst` - Timeform US Most Recent Speed Figure
+* `tfus_lst3` - Timeform US Average of Last 3 Speed Figures
+* `tfus_avg` - Timeform US Avg of Last and Average of Last 3
+* `rags_lst` - Ragozin Sheet Most Recent Speed Figure
+* `rags_lst3` - Ragozin Sheet Average of Last 3 Speed Figures
+* `rags_avg` - Ragozin Avg of Last and Average of Last 3
+
+
+### __Load and Preprocess Data__
+
+Data for PonyPickR  was compiled from Timeform US and Ragozin Speed Figures.  Information was gathered for the first race at Aqueduct racetrack on February 8, 2020. The first race at Acqueduct on February 8th was a seven horse field racing over mile on the dirt course.  Our ratings are on different scales.  Therefore, we use the scales packages to place data on a consistent 1-100 scale.  Tables 1 and 2 below set forth the raw and scaled ratings for our data set.
+</br>
+</br>
+
+#### Table 1. Raw Data
+
+```{r, echo=FALSE, message=FALSE}
+df <- read_csv("p1d.csv")
+
+df %>% 
+  kable() %>% 
+  kable_styling()
+
+```
+
+
+#### __Table 2. Scaled Data - Scaled to a Range of 1 to 100__
+
+#### *The scaled data frame is assigned to the user_matrix variable.*
+
+```{r, echo=FALSE, message=FALSE}
+
+# Use rescale function to scale horse rating to standard 1-100 scale.
+
+# rescale(x, to = c(0, 1), from = range(x, na.rm = TRUE, finite = TRUE))
+
+
+df$tfus_lst = rescale(df$tfus_lst, to=c(1,100), from=range(c(1,130)))
+df$tfus_lst3 = rescale(df$tfus_lst3, to=c(1,100), from=range(c(1,130)))
+df$rags_lst = rescale(df$rags_lst, to=c(100,1), from=range(c(100,-4)))
+df$rags_lst3 = rescale(df$rags_lst3, to=c(100,1), from=range(c(100,-4)))
+df$tfus_avg = rescale(df$tfus_avg, to=c(1,100), from=range(c(1,130)))  
+df$rags_avg = rescale(df$rags_avg, to=c(100,1), from=range(c(100,-4)))
+
+df %>% 
+  kable() %>% 
+  kable_styling()
+
+user_matrix <- df
+```
+
+
+### __Create Training and Test Data Sets__
+
+#### *We utiize tidymodels to create  75/25 training and test data sets. *
+
+
+```{r}
+
+user_matrix <- user_matrix %>% 
+  gather('tfus_lst', 'tfus_lst3', 'rags_lst', 'rags_lst3', 'tfus_avg', 'rags_avg', key="rater", value="rating")
+
+
+# Fix the random numbers by setting the seed 
+# This enables the analysis to be reproducible when random numbers are used 
+set.seed(4763)
+# Put 3/4 of the data into the training set 
+data_split <- initial_split(user_matrix, prop = 3/4)
+
+# Create data frames for the two sets:
+train_data <- training(data_split)
+test_data  <- testing(data_split)
+
+```
+
+
+#### *Training Data Set*
+
+```{r echo=FALSE}
+
+train_data %>% 
+  spread(horse, rating) %>% 
+  kable() %>% 
+  kable_styling()
+```
+
+
+#### *Test Data Set*
+
+```{r echo=FALSE}
+
+test_data %>% 
+  spread(horse, rating) %>% 
+  kable() %>% 
+  kable_styling()
+```
+
+
+### __Using your training data, calculate the raw average (mean) rating for every user-item combination.__
+
+```{r, echo = TRUE}
+
+train_data <- train_data %>% 
+  mutate(raw_mean = mean(rating, na.rm=TRUE)) 
+```
+
+### __Calculate the RMSE for raw average for both your training data and your test data__
+
+
+```{r echo = TRUE}
+
+train_data <- train_data %>% 
+  mutate(rmse = sqrt(mean((raw_mean-rating)^2,na.rm =TRUE)))
+```
+
+#### *The train_data raw_mean and RMSE are highlighted in red below.*
+
+```{r echo = FALSE}
+train_data %>% 
+  spread(horse, rating) %>% 
+  kable() %>% 
+  kable_styling() %>% 
+  column_spec(2:3, bold=T, color="white", background = "#D7261E")
+```
+
+
+```{r, echo = TRUE}
+
+test_data <- test_data %>% 
+  mutate(raw_mean = max(train_data$raw_mean)) %>% 
+  mutate(rmse = sqrt(mean((raw_mean-rating)^2,na.rm =TRUE)))
+```
+
+#### *The test_data RMSE is highligted in blue below.*
+
+```{r echo = FALSE}
+test_data %>% 
+  spread(horse, rating) %>% 
+  kable() %>% 
+  kable_styling() %>% 
+  column_spec(3, bold=T, color="white", background = "blue")
+
+```
+
+
+### __Using your training data, calculate the bias for each user and each item.__
+
+```{r}
+train_data_r <- train_data %>% 
+  group_by(rater) %>%
+  mutate(user_bias = mean(rating, na.rm=TRUE)-raw_mean) 
+
+```
+
+#### ***The user (rater) bias is highlighted in green in the table below.***
+
+```{r echo=FALSE}
+train_data_r %>% 
+  spread(horse, rating) %>% 
+  kable() %>% 
+  kable_styling() %>% 
+  column_spec(2:3, bold=T, color="white", background = "#D7261E") %>% 
+  column_spec(4, bold=T, color="white", background = "green") 
+
+```
+
+
+
+```{r}
+  
+ train_data_h <- train_data %>% 
+   group_by(horse) %>% 
+   mutate(item_bias = mean(rating, na.rm=TRUE)-raw_mean) 
+```
+
+
+#### ***The item bias is highlighted in green in the table below.***
+
+```{r echo=FALSE}
+
+train_data_h %>% 
+  spread(rater, rating) %>% 
+  kable() %>% 
+  kable_styling() %>% 
+  column_spec(2:3, bold=T, color="white", background = "#D7261E") %>%  
+  column_spec(4, bold=T, color="white", background = "green")
+
+
+
+```
+
+
+### __From the raw average, and the appropriate user and item biases, calculate the baseline predictors for every user-item combination.__
+
+```{r}
+ 
+lookup_r <- train_data_r %>% 
+  select(rater, user_bias, raw_mean, rmse) %>% 
+  unique()
+
+lookup_h <- train_data_h %>% 
+  select(horse, item_bias) %>% 
+  unique()
+
+ user_matrix <- user_matrix %>%  
+   left_join(lookup_r,by=c("rater"="rater"),copyp=TRUE) %>% 
+   left_join(lookup_h,by=c("horse"="horse"),copyp=TRUE) %>%
+   mutate(bl_pred = raw_mean + item_bias + user_bias) %>% 
+   mutate(rmse2 = sqrt(mean((bl_pred-rating)^2,na.rm =TRUE))) %>% 
+   mutate(decrease_in_rmse = rmse2 / rmse -1)
+```
+
+
+#### ***The train_data base line prediction, RME and the decrease from the raw_mean RMSE are highlighted in red. The original RMSE is highlighted in green.***
+
+```{r echo=FALSE}
+
+ user_matrix %>% 
+  kable() %>% 
+  kable_styling() %>% 
+  column_spec(8:10, bold=T, color="white", background = "#D7261E") %>% 
+  column_spec(6, bold=T, color="white", background = "green")
+  
+  
+```
+
+
+```{r}
+
+test_lookup <- user_matrix %>% 
+  select(horse, rater, bl_pred)
+
+test_data <- test_data %>% 
+  left_join(test_lookup, by=c("horse","rater")) %>% 
+  mutate(rmse2 = sqrt(mean((bl_pred-rating)^2,na.rm =TRUE))) %>% 
+  mutate(decrease_in_rmse = rmse2 / rmse -1)
+```
+
+#### ***The test_data base line predictor (calculated from train_data), RMSE and the decrease from the raw_mean RMSE are highlighted in red. The raw_mean RMSE is highlighted in green.***
+
+
+```{r echo=FALSE}
+
+test_data %>% 
+  kable() %>% 
+  kable_styling() %>% 
+  column_spec(6:8, bold=T, color="white", background = "#D7261E") %>% 
+  column_spec(5, bold=T, color="white", background = "green")
+  
+
+```
+ 
+ 
+ ### __Summarized Results__
+ 
+#### In Project 1 we gathered Horse Ratings from speed figure makers. We used this infomation like survey information to build a recommender system under two different methods, raw_mean and base line predictor.  The raw mean is a more crude approach that does not factor in rater or horse biases.  The base line predictor method incorporates the raw mean as well as user and item bias.  Accordingly, its expected that base line predictor method would yield better results. This is ecactly what we would found.  The raw mean approach had training and test_data RMSEs of `11.65` and `8.10`, respectively.  This compares to RMSEs of `4.52` and `4.73` for the base line predictor methodology.  The base line predictor approach reduced the RMSE in the train and test_data sets by `61.2%` and `41.7%`, respectively.
+
+</br>
+
+#### __Table 3. Summary Results__
+
+Method          |            Data Set        |          Raw Mean        |          RMSE
+----------------|----------------------------|--------------------------|---------------------
+raw_mean        |            train           |            65.73         |         11.65
+raw_mean        |            test            |            65.73         |          8.11
+base line pred  |            train           |            65.73         |          4.52
+base line pred  |            train           |            65.73         |          4.73
