@@ -1,0 +1,49 @@
+---
+title: "Data 612- Research 1 - Amazon Recommender"
+author: "Jim Mundy"
+date: "6/15/2020"
+output: html_document
+---
+
+## My Experience and Findings
+
+The primary items I purchase from Amazon are books and Kindle books.  I also make the occasional  random purchase for miscellaneous items. 
+
+Below are recommendations I saw today in the My Amazon section of the Amazon Website after I logged in.  When it comes to my Kindle, it's loaded with technology books, SQL, Ruby, Javascript, and lately a lot of books on R, R programming, ggplot, and the like.   In this category, Amazon nailed me pretty good as you can see below.  It's pretty much exclusively recommending books related to R or Data Science. 
+
+I the past I have also purchased numerous books on Handicapping and Horse racing.  Though, I have not made one of these purchases in several years.  But the Humor and Entertainment Recommender seems to have my purchase history.  As all the recommendations were on horse racing. 
+
+In January of 2019, I had to have neck surgery.  For the two weeks leading up to my surgery, I had to shower with Hibiclens surgical soap.  I purchased my supply of Hibiclens in December 2018 and have not purchased any since.   That didn't Amazon's personal item recommendation engine from recommending three varieties of Hibiclens along with some Hair Scarfs and some plush micro towels. 
+
+Its also worth noting, that I have never rated a book or product on Amazon or Good Reads. 
+
+Based on these observations, I believe Amazon utilizes an item to item colaborative filtering algorithm that categorizes purchases.  Then within each category finds others who have purchased the same item(s) and then makes recommendations by suggesting items that there were purchased by those who have purchased the same items as me, but that I have not purchased.  Based upon the scarf recommendation, I doubt the recommender engine factor demographics  (age, gender, race, zip code) into its recommendations - perhaps they should. I would suspect there is a cost of bad recommendation.  First, it's a wasted opportunity to put a product in front of an existing customer. Second, poor recommendations could turn off a potential purchaser and cause them to ignore the good recommendations.   
+
+I can definitely see advantages of incorporating demographic data, but I also see some potential downside in the area of race and gender. 
+
+When given enough information, the Amazon recommender seems to do very well.  With less information, I think the engine does fine given the limited information, but I do believe there is a hidden cost to bad recommendations. 
+
+## Additional Findings
+
+Some additional research allowed me to confirm that Amazon currently uses item-to-item collaborative filtering, which scales to massive data sets and produces high-quality recommendations in real time.This type of filtering matches each of the user’s purchased and rated items to similar items, then combines those similar items into a recommendation list for the user. Their recommendation algorithm is an effective way of creating a personalized shopping experience for each customer which helps Amazon increase average order value and the amount of revenue generated from each customer.
+
+
+Kindle Books - Recommendations
+
+![][1]
+
+
+Humor & Entertainment - Recommendations
+
+![][2]
+
+
+Personal Item - Recommendations 
+
+![][3]
+
+
+
+[1]: C:\Users\jim.mundy\Downloads\kindlebooks.JPG "Kindle"
+[2]: C:\Users\jim.mundy\Downloads\racing.JPG "Racing"
+[3]: C:\Users\jim.mundy\Downloads\personal.JPG "Personal"
