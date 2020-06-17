@@ -1,0 +1,271 @@
+---
+title: "DATA 612 Project 2"
+author: "Jim Mundy"
+output:
+  html_document:
+    css: ./lab.css
+    highlight: pygments
+    theme: cerulean
+    toc: false
+    toc_float: false
+  pdf_document: default
+---
+
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(readxl)               
+library(tidyverse)
+library(lubridate)
+library(skimr)                
+library(knitr)
+library(kableExtra)
+library(recommenderlab)
+library(ggthemes)
+```
+
+## Load and Review Data
+
+#### We use data from the UCI Machine Learning Repository to develop a market basket analysis recommender system utilizing the RecommenderLab package. The dataset is an online retail dataset comprised of approximately 540,000 observations spread over 8 variables, before data cleasing. Variables include: Invoice Number, Stock Code, Description, Quanity, Invoice Date, Unit Price, Customer ID and country.  
+
+#### We'll utilize the skim and glimpse functions to review the data.
+
+```{r}
+retail <- read_excel("Online Retail.xlsx", trim_ws = TRUE)
+
+retail %>% glimpse()
+
+
+```
+
+```{r}
+retail %>% skim()
+```
+
+
+## Data Preprocessing
+
+#### The data includes cancelled orders, has some missing data, as well as negative quantities. The script below addresses the data challenges. 
+
+
+```{r}
+retail <- retail %>% 
+  drop_na() %>% 
+  filter(Quantity >0) %>% 
+  mutate(InNo_Desc = paste(InvoiceNo, Description, sep = ' ')) %>% 
+  # Setting 'Description' and 'Country' as factors
+  mutate(Description = as.factor(Description)) %>%
+  mutate(Country = as.factor(Country)) %>% 
+# Changing 'InvoiceNo' type to numeric
+  mutate(InvoiceNo = as.numeric(InvoiceNo)) %>% 
+# Extracting 'Date' and 'Time' from 'InvoiceDate'
+  mutate(Date = as.Date(InvoiceDate)) %>% 
+  mutate(Time = as.factor(format(InvoiceDate,"%H:%M:%S")))
+```
+
+### EDA
+
+#### The following ggplots provide some additional insight to the dataset.
+
+```{r}
+retail %>% 
+  ggplot(aes(wday(Date, 
+                  week_start = getOption("lubridate.week.start", 1)))) + 
+  geom_histogram(stat = "count" , fill = "blue", colour = "blue") +
+  labs(x = "Day of Week", y = "") +
+  scale_x_continuous(breaks = c(1,2,3,4,5,6,7),
+                     labels = c("Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun")) +
+  theme_fivethirtyeight(base_size = 14)
+```
+
+```{r}
+retail %>% 
+  ggplot(aes(hour(hms(Time)))) + 
+  geom_histogram(stat = "count",fill = "blue", colour = "blue") +
+  labs(x = "Hour of Day", y = "") +
+  theme_fivethirtyeight(base_size = 12)
+
+```
+
+## Create Rating Matrix
+
+####  Now we create a unique key and create a Rating Matrix.  We have chosen to use a Binary Rating Matrix for our analysis. The binary matrix is comprised of zeros and ones.  A one represents an item that was purchased.  Binary matrices offer the added benefit of need to normalize the matrix. 
+
+```{r}
+
+retail <- retail %>% 
+# Create unique identifier
+    mutate(InNo_Desc = paste(InvoiceNo, Description, sep = ' ')) 
+# Filter out duplicates and drop unique identifier
+    retail <- retail[!duplicated(retail$InNo_Desc), ] %>% 
+    select(-InNo_Desc)
+
+
+
+ratings_matrix <- retail %>% 
+  select(InvoiceNo, Description) %>%
+  mutate(value=1) %>%
+  spread(Description, value, fill = 0) %>%
+  select(-InvoiceNo) %>%
+  as.matrix() %>%
+  as("binaryRatingMatrix")
+
+
+  
+```
+
+### Evaluation Schema
+
+We create a training set comprised of 80% of the data. The remain data is will be the test data set.  Additionally, the test schema will use all but one radomly selected items (given -1). 
+
+```{r message=FALSE}
+scheme <- ratings_matrix %>% 
+  evaluationScheme(method = "cross",
+                   k      = 5, 
+                   train  = 0.8,  
+                   given  = -1) 
+  
+```
+
+### Determine Model Types
+
+#### RecommenderLab enables one to estimate multiple model types at the same time.  We have chosen Item-based Collaborative Filtering and User-based Collaborative Filtering for our analysis. Ulitimately we will identify the best modeling appraoch to create our recommender engine. Nearest neighbor and cosine are utilized in the IBCF and UBCF, respectively. 
+
+```{r}
+algorithms <- list(
+  "item-based CF"     = list(name  = "IBCF", param = list(k = 5)),
+  "user-based CF"     = list(name  = "UBCF", 
+                        param = list(method = "Cosine", nn = 500))
+                   )
+```
+
+
+### Estimate Models
+
+#### We have specified models that will return the topNList of products where n is equal to 2, 5, 10, 15, and 20. Note - the model estimation takes a bit of time on my sad mac mini. 
+
+```{r, cache=TRUE}
+results <- recommenderlab::evaluate(scheme, 
+                                    algorithms, 
+                                    type  = "topNList", 
+                                    n     = c(2, 5, 10, 15, 20)
+                                    )
+
+```
+
+
+## Modeling Results
+
+#### We extract results, organize in table form and them create ROC and PR curves to determine the best algorithm. As you will see below, item-based model is the clear winner. 
+
+```{r}
+tmp <- results$`user-based CF` %>%
+  getConfusionMatrix()  %>%  
+  as.list() 
+# Calculate average value of 5 cross-validation rounds 
+  as.data.frame( Reduce("+",tmp) / length(tmp)) %>% 
+# Add a column to mark the number of recommendations calculated
+  mutate(n = c(2, 5, 10, 15, 20)) %>%
+# Select only columns needed and sorting out order 
+  select('n', 'precision', 'recall', 'TPR', 'FPR')
+```
+
+#### The table below sets forth key metrics (precision, recall, TPR, etc.) for both algorithms and at all values of n. 
+
+```{r}
+avg_conf_matr <- function(results) {
+  tmp <- results %>%
+    getConfusionMatrix()  %>%  
+    as.list() 
+    as.data.frame(Reduce("+",tmp) / length(tmp)) %>% 
+    mutate(n = c(3, 5, 10, 15, 20)) %>%
+    select('n', 'precision', 'recall', 'TPR', 'FPR') 
+}
+
+results_tbl <- results %>%
+  map(avg_conf_matr) %>% 
+# Turning into an unnested tibble
+  enframe() %>%
+# Unnesting to have all variables on same level
+  unnest()
+
+results_tbl
+
+```
+
+### ROC Curves
+
+#### The ROC curve plots the true positive rate (TPR) against the false positive rate (FPR).
+
+
+```{r}
+results_tbl %>%
+  ggplot(aes(FPR, TPR, 
+             colour = fct_reorder2(as.factor(name), 
+                      FPR, TPR))) +
+  geom_line() +
+  geom_label(aes(label = n))  +
+  labs(title = "ROC curves", colour = "Model") +
+  theme_fivethirtyeight(base_size = 14)
+```
+
+### PR Curves
+
+#### Precision shows how sensitive models are to False Positives (i.e. recommending an item not very likely to be purchased) whereas Recall (which is just another name for the TPR) looks at how sensitive models are to False Negatives (i.e. do not suggest an item which is highly likely to be purchased).
+
+
+```{r}
+results_tbl %>%
+  ggplot(aes(recall, precision, 
+             colour = fct_reorder2(as.factor(name),  
+                      precision, recall))) +
+  geom_line() +
+  geom_label(aes(label = n))  +
+  labs(title = "Precision-Recall curves", colour = "Model") +
+  theme_fivethirtyeight(base_size = 14)
+```
+
+## Make Recommendation
+
+
+#### To make a recommendation, we first create a sample customer order that will be input into the recommendation engine.   
+
+```{r}
+customer_order <- c("GREEN REGENCY TEACUP AND SAUCER",
+                     "SET OF 3 BUTTERFLY COOKIE CUTTERS",
+                     "JAM MAKING SET WITH JARS",
+                     "SET OF TEA COFFEE SUGAR TINS PANTRY",
+                     "SET OF 4 PANTRY JELLY MOULDS")
+```
+
+
+#### Secondly we transform our sample order into the required Recommenderlab format (binaryRatingMatrix).
+
+```{r}
+new_order_rat_matrx <- retail %>% 
+  select(Description) %>% 
+  unique() %>% 
+  mutate(value = as.numeric(Description %in% customer_order)) %>% 
+  spread(key = Description, value = value) %>% 
+  as.matrix() %>% 
+  as("binaryRatingMatrix")
+
+```
+
+
+#### Next we create the recommender by using the getData function to retrieve the training data and by specifiying the IBCF method algorithm.
+
+```{r}
+recomm <- Recommender(getData(scheme, 'train'), method = "IBCF", param = list(k = 5))
+
+```
+
+
+#### Finally, the recommender (recomm) is passed to the predict function along with the sample order to perform a recommendation.  The recommendation is then displayed as a list. 
+
+```{r}
+pred <- predict(recomm,newdata = new_order_rat_matrx,n= 10)
+
+as(pred, 'list')
+```
+
