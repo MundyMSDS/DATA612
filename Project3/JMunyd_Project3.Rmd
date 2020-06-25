@@ -1,0 +1,352 @@
+---
+title: "DATA 612 Project 3"
+author: "Jim Mundy"
+output:
+  html_document:
+    css: ./lab.css
+    highlight: pygments
+    theme: cerulean
+    toc: false
+    toc_float: false
+  pdf_document: default
+---
+
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, 
+                      warning = FALSE, 
+                      message = FALSE)
+```
+
+
+
+```{r}
+# Required libraries
+library(recommenderlab)  
+library(tidyverse)           
+library(ggthemes)
+library(kableExtra)
+library(skimr)
+library(ggrepel)         
+library(tictoc)         
+```
+
+## Overview
+
+#### The goal of this assignment is give you practice working with Matrix Factorization techniques.Your task is implement a matrix factorization method—such as singular value decomposition (SVD) or Alternating Least Squares (ALS)—in the context of a recommender system. You may approach this assignment in a number of ways. You are welcome to start with an existing recommender system written by yourself or someone else. Remember as always to cite your sources, so that you can be graded on what you added, not what you found. SVD can be thought of as a pre-processing step for feature engineering. You might easily start with thousands or millions of items, and use SVD to create a much smaller set of “k” items (e.g. 20 or 70).
+
+## My Approach
+
+#### We use the Movie Lens data set to explore SVD, Matrix Factorization and compare SVD to other algorithms.  Key steps in this analysis include. 
+
+#### - Data - Load and Preprocess the Data.  The data is comprised of two csv files ratings and movies
+#### - EDA - Perform some basic EDA to better understand the data
+#### - Split Data - Create a training and Test data set
+#### - Build Models - We will build two models SVD and UBCF
+#### - Assess Speed - We will utilize the tictoc package to assess the speed to build and predict models
+#### - Predictions and Comparisons - We predict using our altrnative algorithms and compare results
+#### - Singular Value Decomposition - We explore SVD
+
+
+
+## The Data Set
+
+The data set is courtesy of __MovieLens__ project and it was downloaded from https://grouplens.org/datasets/movielens/. Please note - I reduced the size of the movie matrix so that my circa 1990 Mac Mini could handle the load. The data set is comprised of two files - rates and titles.  We utilized the skimr package to explore the data.   SVD models require no missing data. Skimr will let us know where we stand in that regard. 
+
+```{r}
+# Data import
+setwd("C:/Users/mutue/OneDrive/Documents/Data612")
+ratings <- read.csv('ratings150.csv')
+titles <- read.csv('movies.csv')
+```
+
+
+### The Ratings
+
+#### The Skimr output shows that there is no missing data - a bit of a surprise. 
+
+```{r}
+
+skim(ratings)
+
+```
+
+### The Movie Titles
+
+```{r}
+skim(titles)
+
+```
+
+
+
+
+## Convert to matrix
+
+#### First we convert our data into the required format - a `realRatingMatrix`. The end result is a 150 by 4332 rating matrix with more than 18,000 ratings. 
+
+
+```{r}
+
+movieMatrix <- ratings %>%
+select(-timestamp) %>%
+spread(movieId, rating)
+
+
+row.names(movieMatrix) <- movieMatrix[,1]
+movieMatrix <- as.matrix(movieMatrix[-c(1)])
+movieRealMatrix <- as(movieMatrix, "realRatingMatrix")
+movieRealMatrix
+```
+
+
+## Split the Data
+
+#### To train and test our models, we need to split our data into training and testing sets. We utilize an 80-20 split, with given of 7 and a goodRatting set to 3.5. 
+
+```{r}
+# Train/test split
+set.seed(7)
+eval <- evaluationScheme(movieRealMatrix, method = "split", train = 0.8, given = 20, goodRating = 3.5)
+train <- getData(eval, "train")
+known <- getData(eval, "known")
+unknown <- getData(eval, "unknown")
+
+
+```
+
+
+## Build Modles
+
+We will build a User-Based Collaborative model and an SVD model.  We will compare each model's performance, based upon RMSE, as well as the time required to build and predict under each methodology. 
+
+
+### User-Based Collaborative Model
+
+See table 1 below for the performance results of the UBCF model. 
+
+```{r}
+# UBCF model
+
+tic("UBCF Model - Training")
+modelUBCF <- Recommender(train, method = "UBCF")
+toc(log = TRUE, quiet = TRUE)
+tic("UBCF Model - Predicting")
+predUBCF <- predict(modelUBCF, newdata = known, type = "ratings")
+toc(log = TRUE, quiet = TRUE)
+
+```
+
+
+### Table 1. UBCF Performance Results.
+```{r echo=FALSE}
+
+PerfUBCF <- calcPredictionAccuracy(predUBCF, unknown) %>%
+  kable() %>% 
+  kable_styling
+
+PerfUBCF
+
+```
+
+
+
+### Singular Value Decomposition (SVD) Model
+
+Next we create the sVD model.  After some tuning, k = 20, was utilized in the final SVD model. Table 2 below set forth the performance of the SVD model.
+```{r}
+# SVD model
+
+tic("SVD Model - Training")
+modelSVD <- Recommender(train, method = "SVD", parameter = list(k = 20))
+toc(log = TRUE, quiet = TRUE)
+tic("SVD Model - Predicting")
+predSVD <- predict(modelSVD, newdata = known, type = "ratings")
+toc(log = TRUE, quiet = TRUE)
+
+
+```
+
+
+### Table 2. SVD Performance Results
+```{r echo=FALSE}
+
+PerfSVD <-  calcPredictionAccuracy(predSVD, unknown) %>%
+  kable() %>% 
+  kable_styling
+
+PerfSVD
+
+```
+
+
+### Performance Assessment
+
+#### The UCBF model outperformed the SVD model by a narrow margin.  The RMSE for the UCBF was 0.868 versus 0.873 for the SVD - a virtual tie from the performance perspective.  Next we will see have fast the models are trained and how fast they produce predictions.  Table 4. below sets forth a comparison of the two alternatives. 
+
+####The result of the speed comparison are interesting.  The UCBF model was trained 10x faster than the SVD(0.02 seconds vs 0.20 seconds). However, it also took almost 10x longer for the UCBF model predictions (0.82 second vs 0.09 seconds).  
+
+#### These results make a strong argument for the SVD model. This is due to the fact that model are trained infrequently, but are called upon for predictions often. Given the near equal RSME performance and the suprior prediction performance the SVD model would be a good choice for a production system. 
+
+```{r echo = FALSE}
+# Display log
+
+log <- as.data.frame(unlist(tic.log(format = TRUE)))
+
+colnames(log) <- c("Run Time")
+
+knitr::kable(log, format = "html") %>%
+  kableExtra::kable_styling(bootstrap_options = c("striped", "hover"))
+
+```
+
+#### Model Predictions
+
+Now we will make some movie predictions to see if the models produce similar results.  Since it's the 22nd of June, we'll pick the 22nd user and see how she rated her movies. 
+
+Our movie rater appears to be a somewhat generous movie rater or someone who simply likes movies. Of the 22 movies rated 18 were either rated 4 or 5.  Dumb & Dumber got a rating of 1, Pulp Fiction and Ace Ventura each earned a 3.  This could indicate that our movie rater does like Violent or Comedy movies. There does appear to be a preference for action/suspence, drama and feel good movies.
+
+
+```{r echo=FALSE}
+
+#mov_rated <- as.data.frame(movieRealMatrix@data[c("7"), ]) 
+
+mov_rated <- as.data.frame(movieRealMatrix@data[22, ]) 
+colnames(mov_rated) <- c("Rating")
+mov_rated$movieId <- as.integer(rownames(mov_rated))
+
+mov_rated <- mov_rated %>% filter(Rating != 0) %>% 
+  inner_join (titles, by="movieId") %>%
+  arrange(Rating) %>%
+  select(Movie = "title", Rating)
+  
+kable(mov_rated) %>%
+  kable_styling()
+
+
+```
+
+## UCBF Prediction
+
+```{r}
+mov_recommend1 <- as.data.frame(predUBCF@data[22, ])
+colnames(mov_recommend1) <- c("Rating")
+mov_recommend1$movieId <- as.integer(rownames(mov_recommend1))
+mov_recommend1 <- mov_recommend1 %>% arrange(desc(Rating)) %>% head(5) %>% 
+  inner_join (titles, by="movieId") %>%
+  select(Movie = "title")
+
+
+kable(mov_recommend1) %>%
+  kable_styling()
+
+```
+
+
+
+
+## SVD Prediction
+
+```{r}
+
+mov_recommend2 <- as.data.frame(predSVD@data[22, ])
+colnames(mov_recommend2) <- c("Rating")
+mov_recommend2$movieId <- as.integer(rownames(mov_recommend2))
+mov_recommend2 <- mov_recommend2 %>% arrange(desc(Rating)) %>% head(5) %>% 
+  inner_join (titles, by="movieId") %>%
+  select(Movie = "title")
+
+
+kable(mov_recommend2) %>%
+  kable_styling()
+
+
+```
+
+
+## UCBF vs SVD
+
+The two approaches yield similar results.  Each algorithm recommended a Star Wars movie and a God Father movie. I can also see similarities between Taxi and Raising Arizona (light hearted and funny).  From here the UCBF recommended two great, albeit violent movies and the SVD went with Butch and Sundance and the Crying Game. These pairs don't seem to be too closely related. 
+
+
+
+## Singular Value Decomposition
+
+#### The base R package can be utilized to decompose a matrix. To accomplish this, first the ratings matrix is normalized - `NA` values are replaced with 0 and there are negative and positive ratings. Next we use the svd function to decompose movieMatrix.
+
+```{r}
+# Normalize matrix
+movieMatrix <- as.matrix(normalize(movieRealMatrix)@data)
+
+# Perform SVD
+movieSVD <- svd(movieMatrix)
+rownames(movieSVD$u) <- rownames(movieMatrix)
+rownames(movieSVD$v) <- colnames(movieMatrix)
+
+```
+
+
+
+## Reduce Number of Concepts
+
+#### We start with 150 concepts and look to reduce the dimension. We can achieve this by setting some singular values in the diagonal matrix (d) to 0.  The reducton process below eables us to reduce the dimensions from `r length(movieSVD$d)` to 77, approximately a 50% reduction.  We base our reduction on a threshold value of 0.9 (see below).
+
+```{r}
+
+n <- length(movieSVD$d)
+total_energy <- sum(movieSVD$d^2)
+for (i in (n-1):1) {
+  energy <- sum(movieSVD$d[1:i]^2)
+  if (energy/total_energy<0.9) {
+    n_dims <- i+1
+    break
+  }
+}
+```
+
+
+## Explore Singular Values
+
+#### The d matrix (vector) can be referenced to see the singular values. This vector is listed in absolute descending order.
+
+```{r}
+trim_mov_D <- movieSVD$d[1:n_dims]
+trim_mov_U <- movieSVD$u[, 1:n_dims]
+trim_mov_V <- movieSVD$v[, 1:n_dims]
+```
+
+#### The sigular values of the first five valres are listed here:  `r trim_mov_D[1]`, `r trim_mov_D[2]`, `r trim_mov_D[3]`, `r trim_mov_D[4]`, `r trim_mov_D[5]`. 
+
+## Display Concepts 
+
+Below we display the five movies with highest values for Concept 1 (1-5) and Concept 2 (6-10).  Shawshank Redemption through Usual Suspects comprise Concept 1. This grouping includes two Star War moviee and, in my opion, three classic movies in Shawshank, Pulp Fiction and Usual Suspect.  One knock against sVD is that the concepts are "anonomous" or a black box.  We take comfort in the fact they seem to go together fairly well.  
+
+Concept 2 is comprised of two Titanic movies, Twister, Mr. Holland's Opus and Arachnophobia.  Aside from the Titanic movies, this grouping is a bit more difficult for me to understand. 
+
+```{r}
+mov_count <- 5
+
+movies <- as.data.frame(trim_mov_V) %>% select(V1, V2)
+movies$movieId <- as.integer(rownames(movies))
+
+mov_sample <- movies %>% arrange(V1) %>% head(mov_count)
+mov_sample <- rbind(mov_sample, movies %>% arrange(V2) %>% head(mov_count))
+mov_sample <- mov_sample %>% inner_join(titles, by = "movieId") %>% 
+  select(Movie = "title", Concept1 = "V1", Concept2 = "V2")
+mov_sample$Concept1 <- round(mov_sample$Concept1, 4)
+mov_sample$Concept2 <- round(mov_sample$Concept2, 4)
+
+knitr::kable(mov_sample) %>%
+  kableExtra::kable_styling()
+```
+
+
+
+
+## Wrap-Up
+
+The SVD algorithm seems to perform as well as other popular algorithms (or at least UBCF). Training a SVD model appears to be more computationally complex and required more time than the UBCF approach. However, when it comes to prediction SVD offer a key advantage for a deployment - it's fast. The SVD prediction was almost 10 times faster than UBCF.  Finally, SVD is a bit of a blackbox. Concepts are produced but there is no guide book that explains what they mean. As long as one is aware of this and SVD produces good results, 10x faster than other algorithms it seem like a viable alternative for a recommender system. 
+
+### Inspiration
+
+-  Mining Massive Dataset
