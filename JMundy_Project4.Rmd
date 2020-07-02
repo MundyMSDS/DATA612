@@ -1,0 +1,298 @@
+---
+title: "DATA 612 Project 4"
+author: "Jim Mundy"
+output:
+  html_document:
+    css: ./lab.css
+    highlight: pygments
+    theme: cerulean
+    toc: false
+    toc_float: false
+  pdf_document: default
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(tidyverse)
+library(recommenderlab)
+library(kableExtra)
+```
+
+## Dataset 
+
+#### We use a TidyTuesday data set comprised of the best hip hop songs off all time. The data set was compile by bbc news and includes a file for polls and a file for rankings. 
+
+
+```{r message=FALSE, warning=FALSE}
+polls <- readr::read_csv('https://raw.githubusercontent.com/rfordatascience/tidytuesday/master/data/2020/2020-04-14/polls.csv')
+rankings <- readr::read_csv('https://raw.githubusercontent.com/rfordatascience/tidytuesday/master/data/2020/2020-04-14/rankings.csv')
+```
+
+
+## Our Game Plan
+
+### We will use the Poll data set to create recommenders that given a list of favorite songs the recommender with suggest other songs that the user might/should like. We will execute the gameplan by training three alternative models UBCF, IBCF and Random.  
+
+
+## EDA
+
+#### We will perform a some EDA to develop a better understanding of the data. 
+
+```{r message=FALSE, warning=FALSE}
+polls %>% 
+  count(title, sort = TRUE) %>% 
+  head(n=10) %>% 
+  kable() %>% 
+  kable_styling()
+```
+
+
+#### Pools over Time 
+
+#### It appears the majority of pools took place during the 1990s. 
+
+```{r message=FALSE, warning=FALSE}
+polls %>% 
+  count(year) %>% 
+  mutate(decade = floor(year/10) *10) %>%
+  mutate(decade = factor(decade)) %>% 
+  ggplot(aes(x=year, y=n, fill = decade)) + geom_col() 
+```
+
+
+
+```{r message=FALSE, warning=FALSE}
+polls %>% 
+  count(artist, sort =TRUE) %>% 
+  ggplot(aes(x=n )) + geom_density()
+```
+
+
+```{r message=FALSE, warning=FALSE}
+rankings %>% 
+  select(artist, n, n1, n2, n3, n4, n5) %>% 
+  group_by(artist) %>% 
+  summarise_all(sum) %>% 
+  filter(!str_detect(artist, 'ft')) %>% 
+  arrange(desc(n1)) %>% 
+  slice(1:10)
+
+```
+
+
+```{r message=FALSE, warning=FALSE}
+polls
+
+```
+
+```{r}
+
+# 15.5% of the top songs were voted by one country.
+polls %>% 
+  count(title, critic_country, name= "song_nom") %>%
+  add_count(title, name= "number_of_countries") %>% 
+  filter(number_of_countries ==1 & critic_country != "US") %>% 
+  nrow() / nrow(polls)
+  
+```
+
+## Create Binanry Hip Hop Matrix
+
+#### We create a Binary Rating Matrix utilizing the number of times s song received a rating from 1 to 5 from critiics
+
+```{r message=FALSE, warning=FALSE}
+rap_matrix <- polls %>% 
+  select(critic_name, title) %>% 
+  mutate(n=1) %>% 
+  arrange(title) %>% 
+  pivot_wider(names_from = "title", values_from = "n", values_fill = list(n=0)) %>% 
+  select(-critic_name) %>% 
+  as.matrix() %>% 
+  as("binaryRatingMatrix")
+
+
+```
+
+
+## Create a Training Schema
+
+
+#### We create a training schema that utilized 80% of the data. 
+
+```{r message=FALSE, warning=FALSE}
+set.seed(4763)
+training_schema <- evaluationScheme(rap_matrix, method = "split", train = .8, given=-1)
+training_schema
+
+```
+
+## Train Models
+
+#### Per our gameplan, we train UBCF, IBCF and Random models. 
+
+### User-based Filtering Model 
+
+```{r message=FALSE, warning=FALSE}
+UBCF_Mod <- evaluate(training_schema, method = "UBCF", type = "topNList", n = c(1,5,10,15,20,25))
+IBCF_Mod <- evaluate(training_schema, method = "IBCF", type = "topNList", n = c(1,5,10,15,20))
+RAND_Mod <- evaluate(training_schema, method = "RANDOM",type="topNList", n = c(1,5,10,15,20))
+```
+
+## Evaluate Models
+
+```{r message=FALSE, warning=FALSE}
+
+models <- list(
+  "UBCF" = list(name = "UBCF", param = NULL),
+  "IBCF" = list(name = "IBCF", param = NULL),
+  "Random" = list(name = "RANDOM", param = NULL))
+  
+evalResults <- evaluate(training_schema, method = models, n = c(1,5,10,15,20))
+
+```
+
+### ROC Curve Plots
+
+#### The UBCF appears to be the superiour model. 
+
+```{r message=FALSE, warning=FALSE}
+plot(evalResults, 
+     annotate = TRUE, legend = "topleft", main = "ROC Curve")
+
+```
+
+
+### Create Final Models Using Optimized Parameters
+
+#### We create final models using the best parameter values as derived from the ROC curves. 
+
+```{r message=FALSE, warning=FALSE}
+UBCF_Final_model <- Recommender(getData(training_schema, "train"), "UBCF", param = list(nn = 20))
+IBCF_Final_model <- Recommender(getData(training_schema, "train"), "IBCF", param = list(nn = 20))
+RAND_Final_model <- Recommender(getData(training_schema, "train"), "RANDOM", param = list(nn = 15))
+  
+```
+
+
+## Make Prediction and Evaluate Accuracy
+
+
+```{r message=FALSE, warning=FALSE}
+Upredictions <- predict(UBCF_Final_model, getData(training_schema, "known"), type = "topNList")
+Ipredictions <- predict(IBCF_Final_model, getData(training_schema, "known"), type = "topNList")
+Rpredictions <- predict(RAND_Final_model, getData(training_schema, "known"), type = "topNList")
+
+accU <- calcPredictionAccuracy(Upredictions, getData(training_schema,"unknown"), given = -1) 
+accI <- calcPredictionAccuracy(Ipredictions, getData(training_schema,"unknown"), given = -1) 
+accR <- calcPredictionAccuracy(Rpredictions, getData(training_schema,"unknown"), given = -1) 
+
+```
+
+### Let take a look at the accuracy of our three models. Overall, UBCF remains the best model. 
+
+```{r message=FALSE, warning=FALSE}
+accuracy <- rbind(accU, accI)
+accuracy <- rbind(accuracy, accR)
+rownames(accuracy) <- c("UBCF","IBCF","Random")
+
+kable(accuracy, format = "html") %>%
+  kableExtra::kable_styling(bootstrap_options = c("striped", "hover"))
+
+```
+
+
+
+## Create Recommender Engines
+
+#### Next we use the Recommender function to create recommender engines that utilize our three models. 
+
+```{r message=FALSE, warning=FALSE}
+Urec_engine <- Recommender(rap_matrix, "UBCF", param = list(n = 20))
+Irec_engine <- Recommender(rap_matrix, "IBCF", param = list(n = 20))
+Rrec_engine <- Recommender(rap_matrix, "RANDOM", param = list(n = 15) )
+
+```
+
+
+## Create a List of Favorite Songs
+
+#### The Recommender requires a list of songs to produce recommendations.   Given the list the engines should recommend some alternative songs that you might like. Five song are chosen and transformed to binaryMatrix formate. 
+
+```{r message=FALSE, warning=FALSE}
+test_songs <- polls %>% 
+  select(title) %>% 
+  distinct() %>% 
+  arrange(title) %>% 
+  filter(title %in% c("In Da Club", "Alright", "Bitch Don’t Kill My Vibe", "Still D.R.E.", "Changes")) %>%  
+  rbind(polls %>% select(title) %>% distinct()) %>% 
+  count(title) %>% 
+  mutate(n = n -1) %>% 
+  pivot_wider(names_from = "title", values_from = "n", values_fill = list(n = 0)) %>% 
+  as.matrix() %>% 
+  as("binaryRatingMatrix")
+
+```
+
+
+## Apply Favorite Song List to Recommendation Engines 
+
+Once the Recommendation Engines are given five favorite songs, it recommends a list of song that the user might / should like. I'm not a big hip hop fan, but my son gave the recommender said the UBCF did in fact do the best job. 
+
+
+### UBCF Recommendatations
+
+```{r message=FALSE, warning=FALSE}
+predict(Urec_engine, test_songs) %>% as("list") %>% as.data.frame()
+```
+
+### IBCF Recommendations
+
+```{r message=FALSE, warning=FALSE}
+predict(Irec_engine, test_songs) %>% as("list") %>% as.data.frame()
+```
+
+### Random Recommendations
+
+```{r message=FALSE, warning=FALSE}
+predict(Rrec_engine, test_songs) %>% as("list") %>% as.data.frame()
+```
+
+
+
+## Business User Experience Goal
+
+#### As the President of the Hip Hop Artist Organization, one of my objectives is to promote all of our artistS. Market research shows that most Hip Hop fans have 3 to 5 artistS that they mainly follow and support.  In an attempt to increae that number and champion all hip hop music, I have asked my crackerjack data scientist to create a Recommender Engine that provides the user with some new content suggestion.   The data scientist has accomplished this by creating a Hybrid Recommender that combines two models - UBCF and Random.  What's even better, the Hybrid model has weights that allow me to determine how strongly one model influences the recommendations relative to the other modeling approach. The higher the UBCF weighting the more the recommendations will be like the UBCF model and vice versa. 
+
+#### Below you can see modeling results for the Hybrid model when weightings are set to 90%/10% and 50%/50%.  At the 90% weighting the Hyprid model recommended 7 songs that were recommended by the UBCF model.  At the 50/50 weighting, the recommender system suggested only two songs that were alson on the UBCF list.
+
+
+## Hybrid Model with Weight Set to 90% (UBCF) to 10% (RANDOM)
+
+```{r message=FALSE, warning=FALSE}
+
+HYBR_Final_Model <- HybridRecommender(
+  UBCF_Final_model,
+  RAND_Final_model,
+  weights = c(0.90, 0.10)
+)
+
+as(predict(UBCF_Final_model, test_songs), "list")
+as(predict(HYBR_Final_Model, test_songs), "list")
+
+```
+
+
+## Hybrid Model with Weight Set to 50% (UBCF) to 50% (RANDOM)
+
+```{r message=FALSE, warning=FALSE}
+
+HYBR_Final_Model <- HybridRecommender(
+  UBCF_Final_model,
+  RAND_Final_model,
+  weights = c(0.50, 0.50)
+)
+
+as(predict(UBCF_Final_model, test_songs), "list")
+as(predict(HYBR_Final_Model, test_songs), "list")
+
+```
