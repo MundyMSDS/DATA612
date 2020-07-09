@@ -1,0 +1,360 @@
+---
+title: "DATA 612 Project 5"
+author: "Jim Mundy"
+output:
+  html_document:
+    css: ./lab.css
+    highlight: pygments
+    theme: cerulean
+    toc: false
+    toc_float: false
+  pdf_document: default
+---
+
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, 
+                      warning = FALSE, 
+                      message = FALSE)
+```
+
+
+
+```{r}
+# Required libraries
+library(recommenderlab)  
+library(tidyverse)           
+library(ggthemes)
+library(kableExtra)
+library(skimr)
+library(ggrepel)         
+library(tictoc)
+library(sparklyr)       
+```
+
+## Overview
+
+#### The goal of this project is to practice beginning to work with a distributed recommender system.  I leverage my Project 3 Recommender System Spark and Sparklyr to add an additional model to my original analysis. Project 3 originally included UCBF and SVD models, we'll use Spark to build and add an ALS model to the analysis. Next we will compare the accuracy of the three approaches and discuss the Spark / Sparklyr experience and potential benefits. Part 1 includes the original Project 3 analysis.  Part 2 includes the new ALS model built with Spark and Sparklyr. We take a step by step approach with this new tool. 
+
+
+# Part 1 - The Original Project 3 Work
+
+## The Data Set
+
+The data set is courtesy of __MovieLens__ project and it was downloaded from https://grouplens.org/data sets/movielens/. Please note - I reduced the size of the movie matrix so that my circa 1990 Mac Mini could handle the load. The data set is comprised of two files - rates and titles.  We utilized the skimr package to explore the data.   SVD models require no missing data. Skimr will let us know where we stand in that regard. 
+
+```{r}
+# Data import
+setwd("C:/Users/mutue/OneDrive/Documents/Data612")
+ratings <- read.csv('ratings150.csv')
+titles <- read.csv('movies.csv')
+```
+
+
+## Convert to matrix
+
+#### First we convert our data into the required format - a `realRatingMatrix`. The end result is a 150 by 4332 rating matrix with more than 18,000 ratings. 
+
+
+```{r}
+
+movieMatrix <- ratings %>%
+select(-timestamp) %>%
+spread(movieId, rating)
+
+
+row.names(movieMatrix) <- movieMatrix[,1]
+movieMatrix <- as.matrix(movieMatrix[-c(1)])
+movieRealMatrix <- as(movieMatrix, "realRatingMatrix")
+movieRealMatrix
+```
+
+
+## Split the Data
+
+#### To train and test our models, we need to split our data into training and testing sets. We utilize an 80-20 split, with given of 7 and a good Ratting set to 3.5. 
+
+```{r}
+# Train/test split
+set.seed(7)
+eval <- evaluationScheme(movieRealMatrix, method = "split", train = 0.8, given = 20, goodRating = 3.5)
+train <- getData(eval, "train")
+known <- getData(eval, "known")
+unknown <- getData(eval, "unknown")
+
+
+```
+
+
+## Build Models
+
+We will build a User-Based Collaborative model and an SVD model.  We will compare each model's performance, based upon RMSE, as well as the time required to build and predict under each methodology. 
+
+
+### User-Based Collaborative Model
+
+See table 1 below for the performance results of the UBCF model. 
+
+```{r}
+# UBCF model
+
+tic("UBCF Model - Training")
+modelUBCF <- Recommender(train, method = "UBCF")
+toc(log = TRUE, quiet = TRUE)
+tic("UBCF Model - Predicting")
+predUBCF <- predict(modelUBCF, newdata = known, type = "ratings")
+toc(log = TRUE, quiet = TRUE)
+
+```
+
+
+### Table 1. UBCF Performance Results.
+```{r echo=FALSE}
+
+PerfUBCF <- calcPredictionAccuracy(predUBCF, unknown) %>%
+  kable() %>% 
+  kable_styling
+
+PerfUBCF
+
+```
+
+
+
+### Singular Value Decomposition (SVD) Model
+
+Next we create the sVD model.  After some tuning, k = 20, was utilized in the final SVD model. Table 2 below set forth the performance of the SVD model.
+```{r}
+# SVD model
+
+tic("SVD Model - Training")
+modelSVD <- Recommender(train, method = "SVD", parameter = list(k = 20))
+toc(log = TRUE, quiet = TRUE)
+tic("SVD Model - Predicting")
+predSVD <- predict(modelSVD, newdata = known, type = "ratings")
+toc(log = TRUE, quiet = TRUE)
+
+
+```
+
+
+### Table 2. SVD Performance Results
+```{r echo=FALSE}
+
+PerfSVD <-  calcPredictionAccuracy(predSVD, unknown) %>%
+  kable() %>% 
+  kable_styling
+
+PerfSVD
+
+```
+
+
+### Performance Assessment
+
+#### The UCBF model outperformed the SVD model by a narrow margin.  The RMSE for the UCBF was 0.868 versus 0.873 for the SVD - a virtual tie from the performance perspective.  Next we will see have fast the models are trained and how fast they produce predictions.  Table 4. below sets forth a comparison of the two alternatives. 
+
+####The result of the speed comparison are interesting.  The UCBF model was trained 10x faster than the SVD(0.02 seconds vs 0.20 seconds). However, it also took almost 10x longer for the UCBF model predictions (0.82 second vs 0.09 seconds).  
+
+#### These results make a strong argument for the SVD model. This is due to the fact that model are trained infrequently, but are called upon for predictions often. Given the near equal RSME performance and the superior prediction performance the SVD model would be a good choice for a production system. 
+
+```{r echo = FALSE}
+# Display log
+
+log <- as.data.frame(unlist(tic.log(format = TRUE)))
+
+colnames(log) <- c("Run Time")
+
+knitr::kable(log, format = "html") %>%
+  kableExtra::kable_styling(bootstrap_options = c("striped", "hover"))
+
+```
+
+#### Model Predictions
+
+Now we will make some movie predictions to see if the models produce similar results.  Since it's the 22nd of June, we'll pick the 22nd user and see how she rated her movies. 
+
+Our movie rater appears to be a somewhat generous movie rater or someone who simply likes movies. Of the 22 movies rated 18 were either rated 4 or 5.  Dumb & Dumber got a rating of 1, Pulp Fiction and Ace Ventura each earned a 3.  This could indicate that our movie rater does like Violent or Comedy movies. There does appear to be a preference for action/suspense, drama and feel good movies.
+
+
+```{r echo=FALSE}
+
+mov_rated <- as.data.frame(movieRealMatrix@data[22, ]) 
+colnames(mov_rated) <- c("Rating")
+mov_rated$movieId <- as.integer(rownames(mov_rated))
+
+mov_rated <- mov_rated %>% filter(Rating != 0) %>% 
+  inner_join (titles, by="movieId") %>%
+  arrange(Rating) %>%
+  select(Movie = "title", Rating)
+  
+kable(mov_rated) %>%
+  kable_styling()
+
+
+```
+
+## UCBF Prediction
+
+```{r}
+mov_recommend1 <- as.data.frame(predUBCF@data[22, ])
+colnames(mov_recommend1) <- c("Rating")
+mov_recommend1$movieId <- as.integer(rownames(mov_recommend1))
+mov_recommend1 <- mov_recommend1 %>% arrange(desc(Rating)) %>% head(5) %>% 
+  inner_join (titles, by="movieId") %>%
+  select(Movie = "title")
+
+
+kable(mov_recommend1) %>%
+  kable_styling()
+
+```
+
+
+
+
+## SVD Prediction
+
+```{r}
+
+mov_recommend2 <- as.data.frame(predSVD@data[22, ])
+colnames(mov_recommend2) <- c("Rating")
+mov_recommend2$movieId <- as.integer(rownames(mov_recommend2))
+mov_recommend2 <- mov_recommend2 %>% arrange(desc(Rating)) %>% head(5) %>% 
+  inner_join (titles, by="movieId") %>%
+  select(Movie = "title")
+
+
+kable(mov_recommend2) %>%
+  kable_styling()
+
+
+```
+
+
+## UCBF vs SVD
+
+#### The two approaches yield similar results.  Each algorithm recommended a Star Wars movie and a God Father movie. I can also see similarities between Taxi and Raising Arizona (light hearted and funny).  From here the UCBF recommended two great, albeit violent movies and the SVD went with Butch and Sundance and the Crying Game. These pairs don't seem to be too closely related. 
+
+
+
+
+# Part 2 - ALS With Spark and Sparklyr
+
+## ALS Model Using Spark
+
+#### We already have an UCBF and SVD models, so now we will use spark to create an ALS model.  Here are the steps for this analysis.
+
+###  Establish Connection to Spark Server - local in this case.
+
+```{r}
+# Connection
+sc <- spark_connect(master = "local")
+
+
+```
+
+
+### Prepare the data
+
+#### We are using the same data set as used above, just a assigning some spark-inspired names to the variables.
+
+```{r}
+
+# Prepare data
+spark_df <- ratings
+spark_df$userId <- as.integer(spark_df$userId)
+spark_df$movieId <- as.integer(spark_df$movieId)
+
+```
+
+
+### Create training and test data frames
+
+```{r}
+
+# Split for training and testing
+which_train <- sample(x = c(TRUE, FALSE), size = nrow(spark_df),
+                      replace = TRUE, prob = c(0.8, 0.2))
+train_df <- spark_df[which_train, ]
+test_df <- spark_df[!which_train, ]
+
+```
+
+
+### Move to Spark server
+
+#### This is the key step of copy the data to the spark server for processing.  The move to spark is accomplished with a simple copy command (sdf_copy_to)
+
+```{r}
+
+# Move to Spark
+spark_train <- sdf_copy_to(sc, train_df, "train_ratings", overwrite = TRUE)
+spark_test <- sdf_copy_to(sc, test_df, "test_ratings", overwrite = TRUE)
+```
+
+
+### Build ALS model in spark using the ml_als command
+
+```{r}
+# Build model
+sparkALS <- ml_als(spark_train, max_iter = 5, nonnegative = TRUE, 
+                   rating_col = "rating", user_col = "userId", item_col = "movieId")
+
+```
+
+
+
+### Model Performance
+
+#### We use the model to make predictions to assess its performance.  We'll use the same metric that were used above for the UCBF and SVD models - MSE, RMSE, and MAE.
+
+```{r}
+
+# Run prediction
+
+sparkPred <- sparkALS$.jobj %>%
+  invoke("transform", spark_dataframe(spark_test)) %>%
+  collect()
+
+
+sparkPred <- sparkPred[!is.na(sparkPred$prediction), ] # Remove NaN due to data set splitting
+
+# Calculate error
+mseSpark <- mean((sparkPred$rating - sparkPred$prediction)^2)
+rmseSpark <- sqrt(mseSpark)
+maeSpark <- mean(abs(sparkPred$rating - sparkPred$prediction))
+
+
+
+# Disconnect
+spark_disconnect(sc)
+```
+
+
+### Display the Spark ALS Model Performance Results
+
+```{r}
+accuracy <- data.frame(RMSE = rmseSpark, MSE = mseSpark, MAE = maeSpark)
+rownames(accuracy) <-  "Spark ALS"
+kable(accuracy) %>%
+  kable_styling()
+```
+
+
+## Compare Results and Discuss Spark
+
+#### The UBCF and SVD model performed better than the ALS, but that not the headline. 
+
+#### Spark and Sparklyr provide the average R programmer an ability to harness the power and speed of spark while staying in the friendly confines of R.  What I experienced was that Spark did not seem to build / calculate the model any faster than RecommenderLabs, however, predictions were significantly faster.  This is because the spark approach loads everything to memory, so once you have a working model it just sits there any memory ready to respond. As a result, spark would be a much better platform to deploy a system at scale. 
+
+#### In conclusion, moving to a distributed architecture would seem advisable when data sets are large, processing is computationally demanding and / or minimizing processing time is critical. 
+
+```{r}
+accuracy <- rbind(calcPredictionAccuracy(predUBCF, unknown), calcPredictionAccuracy(predSVD, unknown), data.frame(RMSE = rmseSpark, MSE = mseSpark, MAE = maeSpark))
+rownames(accuracy) <- c("RecLabs_UBCF", "RecLab_SVD", "Spark ALS")
+kable(accuracy) %>%
+  kable_styling()
+```
+
+
