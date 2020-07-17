@@ -1,0 +1,57 @@
+---
+title: "DATA 612 Final Project Proposal"
+author: "Jim Mundy"
+output:
+  html_document:
+    css: ./lab.css
+    highlight: pygments
+    theme: cerulean
+    toc: false
+    toc_float: false
+  pdf_document: default
+---
+
+
+```{r message=FALSE, warning=FALSE, echo=FALSE}
+library(readr)
+library(skimr)
+
+books <- read_csv('books.csv')
+ratings <- read_csv('ratings.csv')
+book_tags <- read_csv('book_tags.csv')
+tags <- read_csv('tags.csv')
+```
+
+
+
+## Planning Document Objective
+
+__Find an interesting dataset and describe the system you plan to build out. The overall goal, however, will be to produce quality recommendations by extracting insights from a large dataset. You may do so using Spark, or another distributed computing method, OR by effectively applying one of the more advanced mathematical techniques we have covered.__
+
+
+
+## Final Project Propsal
+
+__For my final project I plan to use the Good Reads dataset and to create and deploy a book recommender engine.  The Good Reads dataset is large with approximarly 1 million user rating across 10,000 books.  The dataset also includes book_tags and tags files that provide additional information. The amount and quality of information in this dataset should enable me to produce a recommendation engine that produces quality recommendations.  Once I have created the recemmendation engine, I will explore various strategy to deploy to the in a product-like manner.  To that end, the speed of the system will be as important as the quality of the recommendations.  Potential tools to deploy the system include spark, algorithms that at excel at quick performance or alternative means. __
+
+__Tables 1 and 2 below utilize the skimr package to provide a summry of the ratings and books datasets.__
+
+
+### Table 1 - Ratings Data Set
+
+
+```{r echo=FALSE}
+skim(ratings)
+
+```
+
+
+### Table 2 - Books Data Set
+
+
+```{r echo=FALSE}
+skim(books)
+
+```
+
+
